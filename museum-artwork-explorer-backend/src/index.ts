@@ -1,98 +1,137 @@
-import express, { Request, Response } from 'express';
+import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
-import sql from 'mssql';
-import dotenv from 'dotenv';
-
-// Load environment variables
-dotenv.config();
+import { JaroWinklerDistance } from 'natural';
+import * as dal from './dal';
 
 const app = express();
-const port = process.env.PORT || 3000;
+const port = 3000;
+const ADMIN_SECRET = 'admin123';
 
-// Middleware
 app.use(cors());
 app.use(express.json());
 
-// --- Database Configuration ---
-const dbConfig: sql.config = {
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  server: process.env.DB_SERVER || 'localhost',
-  database: process.env.DB_NAME,
-  options: {
-    encrypt: true, // Use this if you're on Azure
-    trustServerCertificate: true, // Change to true for local dev / self-signed certs
-  },
+// Logger
+app.use((req, res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+  next();
+});
+
+// Admin Protection Middleware
+const adminAuth = (req: Request, res: Response, next: NextFunction) => {
+  const secret = req.headers['x-admin-secret'];
+  const cleanReceived = secret ? String(secret).trim() : '';
+  if (cleanReceived === ADMIN_SECRET) {
+    next();
+  } else {
+    res.status(403).json({ error: 'Forbidden: Admin access only' });
+  }
 };
 
-// Create a global connection pool
-const pool = new sql.ConnectionPool(dbConfig);
-const poolConnect = pool.connect()
-  .then(() => {
-    console.log('✅ Connected to SQL Server database.');
-  })
-  .catch(err => {
-    console.error('❌ Database connection failed:', err);
+// --- API ROUTES ---
+
+app.get('/api/ping', (req, res) => res.json({ status: 'alive', version: 'v2-admin-master' }));
+
+// Public Museum
+app.get('/api/museums', async (req, res) => res.json(await dal.getAllMuseums()));
+app.get('/api/museums/:id', async (req, res) => {
+  try {
+    const data = await dal.getMuseumDetails(parseInt(req.params.id));
+    if (!data) return res.status(404).json({ error: 'Museum not found' });
+    res.json(data);
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// Public Search
+app.get('/api/search/artworks', async (req, res) => {
+  const query = (req.query.q as string) || '';
+  try {
+    const exactResults = await dal.searchArtworks(query);
+    let suggestions: any[] = [];
+    if (query.length > 2) {
+      const allTitles = await dal.getAllArtworkTitles();
+      suggestions = allTitles
+        .map((item: any) => ({
+          ...item,
+          distance: JaroWinklerDistance(query.toLowerCase(), item.Title.toLowerCase())
+        }))
+        .filter((item: any) => item.distance > 0.7 && !exactResults.some((r: any) => r.ArtworkID === item.ArtworkID))
+        .sort((a: any, b: any) => b.distance - a.distance)
+        .slice(0, 3);
+    }
+    res.json({ results: exactResults, suggestions: suggestions });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/artworks/:id', async (req, res) => res.json(await dal.getArtworkDetails(parseInt(req.params.id))));
+app.get('/api/exhibitions/:id', async (req, res) => res.json(await dal.getExhibitionDetails(parseInt(req.params.id))));
+app.get('/api/artists/:id', async (req, res) => res.json(await dal.getArtistDetails(parseInt(req.params.id))));
+app.get('/api/trivia/:type/:id', async (req, res) => res.json(await dal.getTriviaForEntity(req.params.type, parseInt(req.params.id))));
+app.get('/api/popular-searches', async (req, res) => res.json((await dal.getPopularSearches(20)).map(r => r.SearchTerm)));
+app.get('/api/log-search', async (req, res) => {
+  await dal.logSearch(req.body.searchTerm);
+  res.json({ success: true });
+});
+
+app.get('/api/daily-masterpiece', async (req, res) => {
+  try {
+    const data = await dal.getDailyMasterpiece();
+    res.json(data);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
+// Admin Lists
+app.get('/api/admin/verify', adminAuth, (req, res) => res.sendStatus(200));
+app.get('/api/admin/museums', adminAuth, async (req, res) => res.json(await dal.getAllMuseums()));
+app.get('/api/admin/artworks', adminAuth, async (req, res) => res.json(await dal.getAllArtworksAdmin()));
+app.get('/api/admin/artists', adminAuth, async (req, res) => res.json(await dal.getAllArtists()));
+app.get('/api/admin/styles', adminAuth, async (req, res) => res.json(await dal.getAllStyles()));
+app.get('/api/admin/cities', adminAuth, async (req, res) => res.json(await dal.getAllCities()));
+app.get('/api/admin/rooms', adminAuth, async (req, res) => res.json(await dal.getAllRooms()));
+app.get('/api/admin/exhibitions', adminAuth, async (req, res) => res.json(await dal.getAllExhibitionsAdmin()));
+app.get('/api/admin/trivia', adminAuth, async (req, res) => res.json(await dal.getAllTrivia()));
+
+// Admin Upserts
+app.post('/api/admin/museums', adminAuth, async (req, res) => { await dal.upsertMuseum(req.body); res.sendStatus(200); });
+app.post('/api/admin/artworks', adminAuth, async (req, res) => { await dal.upsertArtwork(req.body); res.sendStatus(200); });
+app.post('/api/admin/artists', adminAuth, async (req, res) => { await dal.upsertArtist(req.body); res.sendStatus(200); });
+app.post('/api/admin/styles', adminAuth, async (req, res) => { await dal.upsertStyle(req.body); res.sendStatus(200); });
+app.post('/api/admin/cities', adminAuth, async (req, res) => { await dal.upsertCity(req.body); res.sendStatus(200); });
+app.post('/api/admin/rooms', adminAuth, async (req, res) => { await dal.upsertRoom(req.body); res.sendStatus(200); });
+app.post('/api/admin/exhibitions', adminAuth, async (req, res) => { await dal.upsertExhibition(req.body); res.sendStatus(200); });
+app.post('/api/admin/trivia', adminAuth, async (req, res) => { await dal.upsertTrivia(req.body); res.sendStatus(200); });
+
+app.delete('/api/admin/:table/:idField/:id', adminAuth, async (req, res) => {
+  try {
+    const { table, idField, id } = req.params;
+    await dal.deleteEntity(table as string, idField as string, id as string);
+    res.sendStatus(200);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+dal.initDb().then(() => {
+  app.listen(port, () => {
+    console.log(`🚀 Master Admin backend at http://localhost:${port}`);
+    console.log(`[PROCESS] Server is active and listening on port ${port}.`);
   });
-
-pool.on('error', err => {
-    console.error('DB ERROR: Global pool error:', err);
+}).catch(err => {
+  console.error('[CRITICAL] Database initialization failed:', err);
+  process.exit(1);
 });
 
-// --- API Endpoints ---
-
-// GET /api/popular-searches - Retrieve the top 3 most searched terms
-app.get('/api/popular-searches', async (req: Request, res: Response) => {
-  try {
-    await poolConnect; // Ensure pool is connected
-    console.log('DB: Pool ready for popular searches.');
-    const result = await pool.request().query`
-      SELECT TOP 3 SearchTerm
-      FROM ArtworkSearchCount
-      ORDER BY SearchCount DESC
-    `;
-    console.log('DB: Fetched popular searches:', result.recordset.map(row => row.SearchTerm));
-    res.json(result.recordset.map(row => row.SearchTerm));
-  } catch (err) {
-    console.error('DB ERROR: Failed to fetch popular searches:', err);
-    res.status(500).send('Error fetching popular searches');
-  }
+// Process debugging
+process.on('exit', (code) => {
+  console.log(`[PROCESS] Process exited with code: ${code}`);
 });
 
-// POST /api/log-search - Log a search term and increment its count
-app.post('/api/log-search', async (req: Request, res: Response) => {
-  const { searchTerm } = req.body;
-  console.log(`Log Search: Request received for term: "${searchTerm}"`);
-
-  if (!searchTerm || typeof searchTerm !== 'string') {
-    return res.status(400).send('Invalid search term');
-  }
-
-  try {
-    await poolConnect; // Ensure pool is connected
-    console.log('DB: Pool ready for logging search.');
-    const query = `
-      MERGE ArtworkSearchCount AS target
-      USING (SELECT @searchTerm AS SearchTerm) AS source
-      ON (target.SearchTerm = source.SearchTerm)
-      WHEN MATCHED THEN
-        UPDATE SET SearchCount = target.SearchCount + 1
-      WHEN NOT MATCHED THEN
-        INSERT (SearchTerm, SearchCount) VALUES (source.SearchTerm, 1);
-    `;
-    await pool.request()
-      .input('searchTerm', sql.NVarChar, searchTerm)
-      .query(query);
-    console.log(`DB: Successfully logged search for "${searchTerm}".`);
-    res.status(200).send('Search logged successfully');
-  } catch (err) {
-    console.error('DB ERROR: Failed to log search:', err);
-    res.status(500).send('Error logging search');
-  }
+process.on('uncaughtException', (err) => {
+  console.error('[PROCESS] Uncaught Exception:', err);
 });
 
-// Start the server
-app.listen(port, () => {
-  console.log(`Backend server listening on http://localhost:${port}`);
-  console.log('--- Database connectivity enabled ---');
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[PROCESS] Unhandled Rejection at:', promise, 'reason:', reason);
 });

@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "target": "ES2017", // Target modern Node.js versions
+    "module": "commonjs", // Use CommonJS modules for Node.js
+    "outDir": "./dist", // Output directory for compiled files (not used by ts-node, but good practice)
+    "rootDir": "./src", // The root directory of your source files
+    "strict": true, // Enable all strict type-checking options
+    "esModuleInterop": true, // Enables CommonJS/ES Module interoperability
+    "skipLibCheck": true, // Skip type checking of declaration files
+    "forceConsistentCasingInFileNames": true // Disallow inconsistently-cased references to the same file
+  },
+  "include": ["src/**/*"], // Which files to include
+  "exclude": ["node_modules"] // Which files to exclude
+}

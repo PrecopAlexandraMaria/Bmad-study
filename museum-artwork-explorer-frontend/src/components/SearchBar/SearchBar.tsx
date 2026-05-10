@@ -1,70 +1,52 @@
-import React, { useState } from 'react';
+import { useState, type ChangeEvent, type KeyboardEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { TextField, InputAdornment, IconButton, Box } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
-
-const API_URL = 'http://localhost:3000'; // Backend server URL
 
 function SearchBar() {
   const [searchTerm, setSearchTerm] = useState('');
   const navigate = useNavigate();
 
-  const handleSearchChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleSearchChange = (event: ChangeEvent<HTMLInputElement>) => {
     setSearchTerm(event.target.value);
   };
 
-  const logSearch = (term: string) => {
-    // Non-blocking fetch
-    fetch(`${API_URL}/api/log-search`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ searchTerm: term }),
-    }).catch((error) => {
-      // Quietly log error to console, do not block user
-      console.error('Failed to log search:', error);
-    });
-  };
-
-  const handleSearch = () => {
-    const trimmedTerm = searchTerm.trim();
-    if (trimmedTerm) {
-      logSearch(trimmedTerm); // Fire and forget logging
-      navigate(`/search?q=${encodeURIComponent(trimmedTerm)}`);
-    }
-  };
-
-  const handleKeyPress = (event: React.KeyboardEvent) => {
-    if (event.key === 'Enter') {
-      handleSearch();
+  const handleSearch = (termToSearch?: string) => {
+    const targetTerm = (termToSearch || searchTerm).trim();
+    if (targetTerm) {
+      navigate(`/search?q=${encodeURIComponent(targetTerm)}`);
     }
   };
 
   return (
-    <Box sx={{ display: 'flex', justifyContent: 'center', my: 4 }}>
+    <Box sx={{ width: '100%', maxWidth: 500, my: 4 }}>
       <TextField
         fullWidth
         variant="outlined"
         placeholder="Search for any artwork..."
         value={searchTerm}
         onChange={handleSearchChange}
-        onKeyPress={handleKeyPress}
+        onKeyPress={(e: KeyboardEvent) => e.key === 'Enter' && handleSearch()}
         sx={{
-          maxWidth: 500,
           '& .MuiOutlinedInput-root': {
-            borderRadius: '25px',
-            paddingRight: '8px',
+            borderRadius: '12px',
+            backgroundColor: '#FFFFFF', 
+            '& fieldset': { borderColor: '#768A96' }, // Steel Blue
+            '&:hover fieldset': { borderColor: '#44576D' }, // Muted Navy
+            '&.Mui-focused fieldset': { borderColor: '#29353C' }, // Deep Slate
           },
+          '& input': { color: '#29353C' }
         }}
-        InputProps={{
-          endAdornment: (
-            <InputAdornment position="end">
-              <IconButton edge="end" onClick={handleSearch} aria-label="search artwork">
-                <SearchIcon />
-              </IconButton>
-            </InputAdornment>
-          ),
+        slotProps={{
+          input: {
+            endAdornment: (
+              <InputAdornment position="end">
+                <IconButton onClick={() => handleSearch()} sx={{ color: '#44576D' }}>
+                  <SearchIcon />
+                </IconButton>
+              </InputAdornment>
+            ),
+          }
         }}
       />
     </Box>

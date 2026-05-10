@@ -1,37 +1,30 @@
-import sql from 'mssql';
-import dotenv from 'dotenv';
+import sqlite3 from 'sqlite3';
+import { open } from 'sqlite';
 import path from 'path';
-
-dotenv.config({ path: path.resolve(__dirname, '../.env') });
-
-const dbConfig = {
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  server: process.env.DB_SERVER || 'localhost',
-  database: process.env.DB_NAME,
-  options: {
-    encrypt: true,
-    trustServerCertificate: true,
-  },
-};
 
 async function verify() {
   try {
-    console.log('Testing connection to database...');
-    const pool = await sql.connect(dbConfig);
+    console.log('Testing connection to SQLite database...');
+    const db = await open({
+      filename: path.resolve(__dirname, '../database.sqlite'),
+      driver: sqlite3.Database
+    });
     console.log('✅ Connection successful!');
 
     console.log('Verifying table ArtworkSearchCount...');
-    const result = await pool.request().query("SELECT * FROM sys.tables WHERE name = 'ArtworkSearchCount'");
-    if (result.recordset.length > 0) {
+    const table = await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='ArtworkSearchCount'");
+    
+    if (table) {
       console.log('✅ Table ArtworkSearchCount exists.');
+      const count = await db.get("SELECT COUNT(*) as count FROM ArtworkSearchCount");
+      console.log(`📊 Current search terms logged: ${count.count}`);
     } else {
-      console.log('❌ Table ArtworkSearchCount does NOT exist. Run npm run setup-db.');
+      console.log('❌ Table ArtworkSearchCount does NOT exist. Start the server to auto-initialize.');
     }
 
-    await pool.close();
+    await db.close();
   } catch (err) {
-    console.error('❌ Connection failed:', err);
+    console.error('❌ Verification failed:', err);
     process.exit(1);
   }
 }
